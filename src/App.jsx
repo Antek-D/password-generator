@@ -13,6 +13,7 @@ import "./App.css";
 const DEFAULT_LENGTH = 12;
 const MIN_LENGTH = 8;
 const MAX_LENGTH = 32;
+const STORAGE_KEY = "password-generator-settings";
 
 // Ambiguous characters commonly confused on paper:
 const AMBIGUOUS = new Set(["1", "l", "I", "0", "O", "o"]);
@@ -95,12 +96,10 @@ function estimateStrength({ length, poolsCount, hasSymbols }) {
 
 export default function App() {
   const [length, setLength] = useState(DEFAULT_LENGTH);
-
   const [useUpper, setUseUpper] = useState(true);
   const [useLower, setUseLower] = useState(true);
   const [useDigits, setUseDigits] = useState(true);
   const [useSymbols, setUseSymbols] = useState(false);
-
   const [easyToRead, setEasyToRead] = useState(true);
 
   const [password, setPassword] = useState("");
@@ -118,6 +117,37 @@ export default function App() {
     // Ensure we can include at least one from each selected pool.
     return Math.max(MIN_LENGTH, poolsCount);
   }, [poolsCount]);
+
+  useEffect(() => {
+  try {
+    const raw = localStorage.getItem(STORAGE_KEY);
+    if (!raw) return;
+
+    const saved = JSON.parse(raw);
+
+    if (typeof saved.length === "number") setLength(saved.length);
+    if (typeof saved.useUpper === "boolean") setUseUpper(saved.useUpper);
+    if (typeof saved.useLower === "boolean") setUseLower(saved.useLower);
+    if (typeof saved.useDigits === "boolean") setUseDigits(saved.useDigits);
+    if (typeof saved.useSymbols === "boolean") setUseSymbols(saved.useSymbols);
+    if (typeof saved.easyToRead === "boolean") setEasyToRead(saved.easyToRead);
+  } catch {
+    // ignoruj błędy – nie psuj UX
+  }
+}, []);
+
+useEffect(() => {
+  const payload = {
+    length,
+    useUpper,
+    useLower,
+    useDigits,
+    useSymbols,
+    easyToRead,
+  };
+
+  localStorage.setItem(STORAGE_KEY, JSON.stringify(payload));
+}, [length, useUpper, useLower, useDigits, useSymbols, easyToRead]);
 
   useEffect(() => {
     if (length < effectiveMinLength) setLength(effectiveMinLength);
@@ -195,17 +225,13 @@ export default function App() {
       <div className="app">
         <header className="topbar">
           <div className="titleBlock">
-            <h1>Secure Password Generator</h1>
+            <h1>Password Generator — Internal Tool</h1>
             <p className="subtitle">
               Narzędzie B2B do generowania silnych haseł dla klientów — z trybem{" "}
               <span className="emph">Easy to Read</span> (bez znaków niejednoznacznych).
             </p>
           </div>
 
-          <div className="badge">
-            <span className="badgeDot" aria-hidden="true" />
-            <span>Corporate Trust</span>
-          </div>
         </header>
 
         <main className="grid">
@@ -323,15 +349,24 @@ export default function App() {
                     onFocus={handleSelectAll}
                     aria-label="Wygenerowane hasło"
                   />
-                  <button className="iconBtn" onClick={handleCopy} disabled={!password} title="Kopiuj do schowka">
-                    ⧉
-                  </button>
+                  <button className="iconBtn" onClick={handleCopy} aria-label="Kopiuj hasło">
+                  <svg
+                    width="18"
+                    height="18"
+                    viewBox="0 0 24 24"
+                    fill="none"
+                    stroke="currentColor"
+                    strokeWidth="2"
+                    strokeLinecap="round"
+                    strokeLinejoin="round"
+                    aria-hidden="true"
+                  >
+                    <rect x="9" y="9" width="13" height="13" rx="2" ry="2" />
+                    <path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1" />
+                  </svg>
+                </button>
                 </div>
 
-                <div className="outputHint">
-                  Wskazówka: w biurze rachunkowym często przekazujesz hasła na papierze — tryb{" "}
-                  <span className="emph">Easy to Read</span> minimalizuje pomyłki.
-                </div>
               </div>
             </div>
           </section>
