@@ -2,12 +2,14 @@ import React, { useEffect, useMemo, useRef, useState } from "react";
 import "./App.css";
 
 /**
- * Corporate Trust / FinTech Password Generator
- * - Pure JS generation
- * - Easy-to-Read mode removes ambiguous characters
- * - Strength meter
- * - One-click copy with toast
- * - Session history (last 3)
+ * Password Generator — Internal Tool (B2B/FinTech)
+ *
+ * Design goals:
+ * - Use cryptographically secure randomness (`window.crypto`) instead of `Math.random`.
+ * - “Easy to Read” mode removes visually ambiguous characters (useful for print/SMS).
+ * - Enforce at least one character from each selected category to avoid weak edge cases.
+ * - Persist user preferences in `localStorage` for a frictionless daily workflow.
+ * - Keep a small session history (last 3) to recover from accidental re-generation.
  */
 
 const DEFAULT_LENGTH = 12;
@@ -15,7 +17,7 @@ const MIN_LENGTH = 8;
 const MAX_LENGTH = 32;
 const STORAGE_KEY = "password-generator-settings";
 
-// Ambiguous characters commonly confused on paper:
+// Characters that are visually ambiguous in common fonts (critical for printed passwords).
 const AMBIGUOUS = new Set(["1", "l", "I", "0", "O", "o"]);
 
 const CHARSETS = {
@@ -31,7 +33,7 @@ function sanitizeCharset(str, easyToRead) {
 }
 
 function cryptoRandomInt(maxExclusive) {
-  // Secure random int in [0, maxExclusive)
+  // Secure random integer in [0, maxExclusive) using Web Crypto.
   if (maxExclusive <= 0) return 0;
   const arr = new Uint32Array(1);
   window.crypto.getRandomValues(arr);
@@ -39,7 +41,7 @@ function cryptoRandomInt(maxExclusive) {
 }
 
 function shuffleCrypto(array) {
-  // Fisher-Yates with crypto RNG
+  // Fisher–Yates shuffle powered by Web Crypto (unbiased and predictable-order resistant).
   const a = [...array];
   for (let i = a.length - 1; i > 0; i--) {
     const j = cryptoRandomInt(i + 1);
@@ -55,7 +57,7 @@ function buildPools({ useUpper, useLower, useDigits, useSymbols, easyToRead }) {
   if (useDigits) pools.push(sanitizeCharset(CHARSETS.digits, easyToRead));
   if (useSymbols) pools.push(sanitizeCharset(CHARSETS.symbols, easyToRead));
 
-  // Remove any empty pools (could happen if easy-to-read filtered everything, though unlikely)
+  // Remove any empty pools (defensive: should not happen, but protects against misconfiguration).
   return pools.filter((p) => p.length > 0);
 }
 
@@ -63,10 +65,10 @@ function generatePassword(length, options) {
   const pools = buildPools(options);
   if (pools.length === 0) return "";
 
-  // Guarantee at least 1 char from each selected pool:
+  // Ensure at least one character from each selected category (security/UX expectation).
   const required = pools.map((pool) => pool[cryptoRandomInt(pool.length)]);
 
-  // Combined pool for remaining:
+  // Use the combined pool to fill the remaining length.
   const combined = pools.join("");
   const remainingCount = Math.max(0, length - required.length);
 
@@ -74,15 +76,12 @@ function generatePassword(length, options) {
     return combined[cryptoRandomInt(combined.length)];
   });
 
-  // Shuffle to avoid predictable placement of required chars
+  // Shuffle to avoid predictable placement of category-guaranteed characters.
   return shuffleCrypto([...required, ...remaining]).join("");
 }
 
 function estimateStrength({ length, poolsCount, hasSymbols }) {
-  // Simple, explainable heuristic for B2B tool:
-  // - length weight
-  // - variety (poolsCount)
-  // - symbols bonus
+  // Simple, explainable heuristic suitable for internal tools (not a formal entropy calculator).
   const lenScore = Math.min(60, (length - 6) * 6); // length 6..16 -> up to ~60
   const varietyScore = poolsCount * 12; // up to 48
   const symbolsBonus = hasSymbols ? 10 : 0;
@@ -103,51 +102,55 @@ export default function App() {
   const [easyToRead, setEasyToRead] = useState(true);
 
   const [password, setPassword] = useState("");
-  const [history, setHistory] = useState([]); // last 3
-  const [copyStatus, setCopyStatus] = useState("idle"); // idle | copied | error
+  const [history, setHistory] = useState([]);
+  const [copyStatus, setCopyStatus] = useState("idle");
 
   const passwordRef = useRef(null);
   const toastTimerRef = useRef(null);
+
+  // Derived values
 
   const poolsCount = useMemo(() => {
     return [useUpper, useLower, useDigits, useSymbols].filter(Boolean).length;
   }, [useUpper, useLower, useDigits, useSymbols]);
 
   const effectiveMinLength = useMemo(() => {
-    // Ensure we can include at least one from each selected pool.
+    // Must be at least the number of enabled categories to satisfy the "one from each" rule.
     return Math.max(MIN_LENGTH, poolsCount);
   }, [poolsCount]);
 
+  // Load persisted user preferences once on startup.
   useEffect(() => {
-  try {
-    const raw = localStorage.getItem(STORAGE_KEY);
-    if (!raw) return;
+    try {
+      const raw = localStorage.getItem(STORAGE_KEY);
+      if (!raw) return;
 
-    const saved = JSON.parse(raw);
+      const saved = JSON.parse(raw);
 
-    if (typeof saved.length === "number") setLength(saved.length);
-    if (typeof saved.useUpper === "boolean") setUseUpper(saved.useUpper);
-    if (typeof saved.useLower === "boolean") setUseLower(saved.useLower);
-    if (typeof saved.useDigits === "boolean") setUseDigits(saved.useDigits);
-    if (typeof saved.useSymbols === "boolean") setUseSymbols(saved.useSymbols);
-    if (typeof saved.easyToRead === "boolean") setEasyToRead(saved.easyToRead);
-  } catch {
-    // ignoruj błędy – nie psuj UX
-  }
-}, []);
+      if (typeof saved.length === "number") setLength(saved.length);
+      if (typeof saved.useUpper === "boolean") setUseUpper(saved.useUpper);
+      if (typeof saved.useLower === "boolean") setUseLower(saved.useLower);
+      if (typeof saved.useDigits === "boolean") setUseDigits(saved.useDigits);
+      if (typeof saved.useSymbols === "boolean") setUseSymbols(saved.useSymbols);
+      if (typeof saved.easyToRead === "boolean") setEasyToRead(saved.easyToRead);
+    } catch {
+      // Ignore corrupted storage values — never break the UI.
+    }
+  }, []);
 
-useEffect(() => {
-  const payload = {
-    length,
-    useUpper,
-    useLower,
-    useDigits,
-    useSymbols,
-    easyToRead,
-  };
+  // Persist preferences whenever the user changes generator options.
+  useEffect(() => {
+    const payload = {
+      length,
+      useUpper,
+      useLower,
+      useDigits,
+      useSymbols,
+      easyToRead,
+    };
 
-  localStorage.setItem(STORAGE_KEY, JSON.stringify(payload));
-}, [length, useUpper, useLower, useDigits, useSymbols, easyToRead]);
+    localStorage.setItem(STORAGE_KEY, JSON.stringify(payload));
+  }, [length, useUpper, useLower, useDigits, useSymbols, easyToRead]);
 
   useEffect(() => {
     if (length < effectiveMinLength) setLength(effectiveMinLength);
@@ -178,7 +181,7 @@ useEffect(() => {
       return updated.slice(0, 3);
     });
 
-    // Keep focus on output for quick copy
+    // Keep focus on the output field for quick copy workflows.
     requestAnimationFrame(() => passwordRef.current?.focus());
   }
 
@@ -207,7 +210,7 @@ useEffect(() => {
     requestAnimationFrame(() => passwordRef.current?.focus());
   }
 
-  // Generate once on initial load (useful as a tool)
+  // Generate immediately on load so the tool is ready without extra clicks.
   useEffect(() => {
     handleGenerate();
     // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -231,7 +234,6 @@ useEffect(() => {
               <span className="emph">Easy to Read</span> (bez znaków niejednoznacznych).
             </p>
           </div>
-
         </header>
 
         <main className="grid">
@@ -277,7 +279,13 @@ useEffect(() => {
                     <span className={`strengthLabel s${strength.level}`}>{strength.label}</span>
                   </div>
 
-                  <div className="meter" role="meter" aria-valuemin={0} aria-valuemax={100} aria-valuenow={strength.score}>
+                  <div
+                    className="meter"
+                    role="meter"
+                    aria-valuemin={0}
+                    aria-valuemax={100}
+                    aria-valuenow={strength.score}
+                  >
                     <div className={`meterFill s${strength.level}`} style={{ width: `${strength.score}%` }} />
                   </div>
 
@@ -289,22 +297,38 @@ useEffect(() => {
 
               <div className="checkboxGrid" role="group" aria-label="Opcje znaków">
                 <label className="check">
-                  <input type="checkbox" checked={useUpper} onChange={(e) => setUseUpper(e.target.checked)} />
+                  <input
+                    type="checkbox"
+                    checked={useUpper}
+                    onChange={(e) => setUseUpper(e.target.checked)}
+                  />
                   <span>Wielkie litery</span>
                 </label>
 
                 <label className="check">
-                  <input type="checkbox" checked={useLower} onChange={(e) => setUseLower(e.target.checked)} />
+                  <input
+                    type="checkbox"
+                    checked={useLower}
+                    onChange={(e) => setUseLower(e.target.checked)}
+                  />
                   <span>Małe litery</span>
                 </label>
 
                 <label className="check">
-                  <input type="checkbox" checked={useDigits} onChange={(e) => setUseDigits(e.target.checked)} />
+                  <input
+                    type="checkbox"
+                    checked={useDigits}
+                    onChange={(e) => setUseDigits(e.target.checked)}
+                  />
                   <span>Cyfry</span>
                 </label>
 
                 <label className="check">
-                  <input type="checkbox" checked={useSymbols} onChange={(e) => setUseSymbols(e.target.checked)} />
+                  <input
+                    type="checkbox"
+                    checked={useSymbols}
+                    onChange={(e) => setUseSymbols(e.target.checked)}
+                  />
                   <span>Znaki specjalne</span>
                 </label>
 
@@ -350,21 +374,21 @@ useEffect(() => {
                     aria-label="Wygenerowane hasło"
                   />
                   <button className="iconBtn" onClick={handleCopy} aria-label="Kopiuj hasło">
-                  <svg
-                    width="18"
-                    height="18"
-                    viewBox="0 0 24 24"
-                    fill="none"
-                    stroke="currentColor"
-                    strokeWidth="2"
-                    strokeLinecap="round"
-                    strokeLinejoin="round"
-                    aria-hidden="true"
-                  >
-                    <rect x="9" y="9" width="13" height="13" rx="2" ry="2" />
-                    <path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1" />
-                  </svg>
-                </button>
+                    <svg
+                      width="18"
+                      height="18"
+                      viewBox="0 0 24 24"
+                      fill="none"
+                      stroke="currentColor"
+                      strokeWidth="2"
+                      strokeLinecap="round"
+                      strokeLinejoin="round"
+                      aria-hidden="true"
+                    >
+                      <rect x="9" y="9" width="13" height="13" rx="2" ry="2" />
+                      <path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1" />
+                    </svg>
+                  </button>
                 </div>
 
               </div>
